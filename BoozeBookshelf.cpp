@@ -23,15 +23,14 @@ the user can start several lighting programs or turn the LEDs to a specific hue 
 */
 
 
-// The pins that the LED strips are plugged into.
-// multi-dimensional array of [shelves][color] where:
-//  * leds[0] is the top shelf
-//  * color is always R, G, B
+// The pins that the LED strips are plugged into as a
+// multi-dimensional array of [shelves][color]
 LEDFader shelves[SHELVES][RGB] = {
-    LEDFader(4), LEDFader(3), LEDFader(2),
-    LEDFader(5), LEDFader(7), LEDFader(6),
-    LEDFader(8), LEDFader(9), LEDFader(10),
-    LEDFader(11), LEDFader(12), LEDFader(13)
+    // Red         Green        Blue
+    LEDFader(4), LEDFader(3), LEDFader(2),   // Shelf 1 (top)
+    LEDFader(5), LEDFader(7), LEDFader(6),   // Shelf 2
+    LEDFader(8), LEDFader(9), LEDFader(10),  // Shelf 3
+    LEDFader(11), LEDFader(12), LEDFader(13) // Shelf 4 (bottom)
 };
 
 // True if any shelves are currently fading
@@ -39,14 +38,13 @@ bool is_fading = false;
 
 // Proximity sensor range state
 int distance = 0;          // current distance
-bool range_medium = false; // medium range <= 75cm
-bool range_close = false;  // close range <= 50cm
-unsigned long out_range_timer = 0; // The time to dim the LEDs when a person goes out of range
 
+// The last IR code received
 char ir_value = 0;
 
-void* custom_program;
-byte custom_program_num = 0;
+// The LED program running
+Program* current_program;
+byte current_program_num = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -61,15 +59,12 @@ void setup() {
 
   // Distance sensor
   Serial2.begin(9600);
+
+  // Default program
+  current_program = new Program0();
 }
 
-int count = 0;
 void loop() {
-
-  if (count > 100) {
-    //return;
-  }
-  count++;
 
   // Update all LEDs
   is_fading = false;
@@ -82,16 +77,13 @@ void loop() {
   }
 
   // Run program
-  bool skip_default = change_program();
-  if (!skip_default) {
-    process_range();
-  }
+  run_program();
 }
 
-/*
-  Utility function, like 'constrain', but when val is larger than max, it becomes min
-  and when it is less than min, it becomes max
-*/
+/**
+ * Utility function, like 'constrain', but when val is larger than max, it becomes min
+ * and when it is less than min, it becomes max
+ */
 int wrap(int val, int min, int max){
   if (val < min)
     return max;
@@ -100,140 +92,67 @@ int wrap(int val, int min, int max){
   return val;
 }
 
-/*
-  Get the distance from the proximity sensor and adjust the LEDs according to how close the person is.
-  Within 75cm, the LEDs turn on to 50%
-  Within 50cm, the LEDs turn on to 100%
-  Otherwise, turn the LEDs off.
-*/
-void process_range() {
-  get_distance();
+/**
+ * Run the current program, or change programs based on the IR remote code received.
+ *
+ * IR Program codes:
+ *
+ *  - POWER   Program 0 (default program)
+ *  - A       program 1
+ *  - B       program 2
+ *  - C       program 3
+ *
+ * Returns the current program number
+ */
+byte run_program() {
+  byte last_prog = current_program_num;
 
-  // Invalid distance
-  if (distance <= 30) {
-    return;
-  }
-
-  // Out of range
-  if (distance > MED_RANGE){
-
-    // If was formerly in range, set timer and dim
-    if (range_medium || range_close) {
-      range_close = false;
-      range_medium = false;
-      Serial.println("Went out of range...");
-
-      out_range_timer = millis() + OUT_OF_RANGE_DELAY;
-
-      // Handle when value wraps back to zero (just add 1 for simplicity)
-      if (out_range_timer == 0) {
-        out_range_timer = 1;
-      }
-    }
-
-    // Timer set and fired, fade out
-    else if(out_range_timer > 0 && out_range_timer <= millis()) {
-      Serial.println("Dim lights");
-      out_range_timer = 0;
-      fade_all(0);
-    }
-  }
-
-  // Medium range
-  if (distance <= MED_RANGE && distance > CLOSE_RANGE && !range_medium && !range_close) {
-    Serial.println("Medium range");
-    range_close = false;
-    range_medium = true;
-    out_range_timer = 0;
-    fade_all(30);
-  }
-
-  // Close range
-  if (!range_close && distance <= CLOSE_RANGE) {
-    Serial.println("Close range");
-    range_close = true;
-    range_medium = true;
-    out_range_timer = 0;
-    fade_all(255);
-  }
-}
-
-/*
-  Receive codes from the IR receiver and move to a program:
-
-  A - program 1
-  B - program 2
-  C - program 3
-  POWER - Switch back to the default behavior (turn on when someone approaches the bookshelf)
-
-  Returns true if a program is running, or false to run the default behavior.
-*/
-bool change_program() {
   // IR Command recieved
-  int last_prog = custom_program_num;
-
   if (Serial1.available()) {
     ir_value = Serial1.read();
     Serial.println(ir_value);
+
+    // Start new program
     switch(ir_value) {
       case IR_POWER: // Turn off custom program and go back to the default behavior
-        custom_program_num = 0;
-        off();
-        range_close = false;
-        range_medium = false;
-        return false;
+        current_program_num = 0;
+        current_program = new Program0();
+      break;
       case IR_A:
-        custom_program_num = 1;
-        custom_program = new Program1();
-        //init_program_1();
+        current_program_num = 1;
+        current_program = new Program1();
       break;
       case IR_B:
-        custom_program_num = 2;
-        custom_program = new Program2();
-        //init_program_2();
+        current_program_num = 2;
+        current_program = new Program2();
       break;
       case IR_C:
-        custom_program_num = 3;
-        custom_program = new Program3();
-        //init_program_3();
+        current_program_num = 3;
+        current_program = new Program3();
       break;
     }
 
     // Program changed
-    if (last_prog != custom_program_num) {
+    if (last_prog != current_program_num) {
       Serial.print("Start program ");
-      Serial.println(custom_program_num);
+      Serial.println(current_program_num);
     }
 
   } else {
     ir_value = 0;
   }
 
-  // Run custom programs
-  switch (custom_program_num) {
-    case 1:
-      ((Program1 *)custom_program)->run();
-//      run_program_1();
-    break;
-    case 2:
-      ((Program2 *)custom_program)->run();
-//      run_program_2();
-    break;
-    case 3:
-      ((Program3 *)custom_program)->run();
-//      run_program_3();
-    break;
-    default:
-      return false;
-  }
+  // Run program
+  current_program->run();
 
-  return (custom_program_num > 0);
+  return current_program_num;
 }
 
-/*
-  Get the distance, in mm, from the MaxSonar sensor
-  (code adapted from http://forum.arduino.cc/index.php?topic=130842.0)
-*/
+
+/**
+ * Get the distance, in mm, from the MaxSonar sensor
+ * (code adapted from http://forum.arduino.cc/index.php?topic=130842.0)
+ */
 int get_distance() {
   if((char)Serial2.peek() == 'R'){
     if(Serial2.available() >= 5) {
@@ -262,9 +181,9 @@ int get_distance() {
   return distance;
 }
 
-/*
- Turn off all LEDs
-*/
+/**
+ * Turn off all LEDs
+ */
 void off() {
   for (int shelf = 0; shelf < SHELVES; shelf++) {
     for (int rgb = 0; rgb < RGB; rgb++) {
@@ -275,64 +194,59 @@ void off() {
   }
 }
 
-/*
-  Set a PWM value on a single LED.
-  Use this instead of analogWrite, so the color value will be saved in the color array matrix.
-*/
-void set_led(int shelf, int led, int value) {
+/**
+ * Set the PWM value on a single LED of a shelf
+ */
+void set_led(byte shelf, byte led, byte value) {
   shelves[shelf][led].set_value(value);
 }
 
-/*
- Set all shelves to the same color
-*/
-void set_shelf(int shelf, int r, int g, int b) {
+/**
+ * Set the RGB value of a shelf.
+ */
+void set_shelf(byte shelf, byte r, byte g, byte b) {
   shelves[shelf][0].set_value(r);
   shelves[shelf][1].set_value(g);
   shelves[shelf][2].set_value(b);
 }
 
-/*
-  Set all shelves to the same color
-*/
-void set_all(int r, int g, int b) {
+/**
+ * Set all shelves to the same RGB color
+ */
+void set_all(byte r, byte g, byte b) {
   for (byte shelf = 0; shelf < SHELVES; shelf++) {
     set_shelf(shelf, r, g, b);
   }
 }
 
-/*
-  Fade a shelf to a color
-*/
-void fade_shelf(byte shelf, int r, int g, int b, int duration) {
-  r = constrain(r, 0, 256);
-  g = constrain(g, 0, 256);
-  b = constrain(b, 0, 256);
+/**
+ * Fade a shelf to an RGB color
+ */
+void fade_shelf(byte shelf, byte r, byte g, byte b, int duration) {
   shelves[shelf][0].fade((uint8_t)r, duration);
   shelves[shelf][1].fade((uint8_t)g, duration);
   shelves[shelf][2].fade((uint8_t)b, duration);
 }
 
-/*
-  Fade all shelves to an RGB value
-*/
-void fade_all(int pwm) {
-  fade_all(pwm, pwm, pwm);
-}
-void fade_all(int r, int g, int b) {
-  fade_all(r, g, b, FADE_SPEED);
-}
-void fade_all(int pwm, int duration) {
+/**
+ * Fade all shelves to white, at an intensity between 0 - 255
+ */
+void fade_all(byte pwm, int duration) {
   fade_all(pwm, pwm, pwm, duration);
 }
-void fade_all(int r, int g, int b, int duration) {
+
+/**
+ * Fade all shelves to the same RGB value.
+ */
+void fade_all(byte r, byte g, byte b, int duration) {
   for (byte shelf = 0; shelf < SHELVES; shelf++) {
     fade_shelf(shelf, r, g, b, duration);
   }
 }
 
-/*
- * Ajust the current fade speed by this many milliseconds
+/**
+ * Adjust the current fade speed by this many milliseconds, up or down
+ * For example, to slow it down by 100 milliseconds, pass -100
  */
 void change_speed(int by) {
   for (int shelf = 0; shelf < SHELVES; shelf++) {
@@ -348,27 +262,89 @@ void change_speed(int by) {
   }
 }
 
-/*
-  Fade all the LEDs
-*/
-bool do_fade_step() {
-  bool ret = false;
-  for (int shelf = 0; shelf < SHELVES; shelf++) {
-    if (update_shelf(shelf)) {
-      ret = true;
-    }
-  }
-  return ret;
+/**
+ * Returns true if the shelf is still fading
+ */
+bool is_shelf_fading(byte shelf) {
+  return (shelves[shelf][0].is_fading()
+      || shelves[shelf][1].is_fading()
+      || shelves[shelf][2].is_fading());
 }
 
 /*
- Run an update on all LEDs of a shelf and return true
- if any are still fading
+ -------------------------
+ Program 0
+ The default program that fades the LEDs Up when someone walks up to the bookshelf and
+ fades them down when the person walks away.
+ -------------------------
 */
-bool update_shelf(byte shelf) {
-  return (shelves[shelf][0].update()
-      || shelves[shelf][1].update()
-      || shelves[shelf][2].update());
+Program0::Program0() {
+  Serial.println("Init program 0");
+
+  range_close = false;
+  range_medium = false;
+  out_range_timer = 0;
+
+  // Fade out all LEDs
+  fade_all(0, 0, 0, 1000);
+}
+
+/**
+ * Get the distance from the proximity sensor and adjust the LEDs according to how close the person is.
+ * Within 75cm, the LEDs turn on to 50%
+ * Within 50cm, the LEDs turn on to 100%
+ * Otherwise, turn the LEDs off.
+ */
+void Program0::run() {
+  int distance = get_distance();
+
+  // Invalid distance, too close to for the sensor
+  if (distance <= 30) {
+    return;
+  }
+
+  // Out of range
+  if (distance > MED_RANGE ){
+
+    // If was formerly in range, set timer and dim
+    if (range_medium || range_close) {
+      range_close = false;
+      range_medium = false;
+      Serial.println("Went out of range...");
+
+      out_range_timer = millis() + OUT_OF_RANGE_DELAY;
+
+      // Handle when value wraps back to zero (just add 1 for simplicity)
+      if (out_range_timer == 0) {
+        out_range_timer = 1;
+      }
+    }
+
+    // Timer set and fired, fade out
+    else if(out_range_timer > 0 && out_range_timer <= millis()) {
+      Serial.println("Dim lights");
+      out_range_timer = 0;
+      fade_all(0, FADE_SPEED);
+    }
+  }
+
+  // Medium range
+  if (distance <= MED_RANGE && distance > CLOSE_RANGE && !range_medium && !range_close) {
+    Serial.println("Medium range");
+    range_close = false;
+    range_medium = true;
+    out_range_timer = 0;
+    fade_all(30, FADE_SPEED);
+  }
+
+  // Close range
+  if (!range_close && distance <= CLOSE_RANGE) {
+    Serial.println("Close range");
+    range_close = true;
+    range_medium = true;
+    out_range_timer = 0;
+    fade_all(255, FADE_SPEED);
+  }
 }
 
 /*
@@ -395,16 +371,10 @@ void Program1::run() {
   for (byte s = 0; s < SHELVES; s++) {
 
     // Change color/direction if fading is done
-    if(update_shelf(s) == false) {
+    if(is_shelf_fading(s) == false) {
 
       // Fade down
       if (direction[s] == 1) {
-        if (s == 1) {
-          Serial.print("Fade down ");
-          Serial.print(s);
-          Serial.print(" -> ");
-          Serial.println(duration[s]);
-        }
         fade_shelf(s, 0, 0, 0, duration[s]);
         direction[s] = -1;
       }
@@ -440,71 +410,16 @@ void Program1::run() {
         direction[s] = 1;
 
 
-        if (s == 1) {
-          Serial.print(colors[0]);
-          Serial.print(", ");
-          Serial.print(colors[1]);
-          Serial.print(", ");
-          Serial.print(colors[2]);
-          Serial.print(" -> ");
-          Serial.println(duration[s]);
-        }
-      }
-    }
-  }
-}
+        Serial.print("Fade up shelf ");
+        Serial.println(s);
 
-/*
- -------------------------
- Custom program 1
- Fade a random color on each shelf
- -------------------------
-*/
-int prog1_dirs[SHELVES] = {0,0,0,0};
-int prod1_durations[SHELVES] = {0,0,0,0};
-void init_program_1(){
-  Serial.println("Init program 1");
-  off();
-  randomSeed(analogRead(0));
-}
-void run_program_1(){
-
-  // Loop over the shelves and set colors when their done fading
-  for (byte s = 0; s < SHELVES; s++) {
-
-    // Change color/direction if fading is done
-    if(update_shelf(s) == false) {
-
-      // Fade down
-      if (prog1_dirs[s] == 1) {
-        fade_shelf(s, 0, 0, 0, prod1_durations[s]);
-        prog1_dirs[s] = -1;
-      }
-
-      // Fade up
-      else {
-        // Generate random pwm on two colors between 75 and 256
-        byte colors[3] = {0,0,0};
-        for(byte i = 0; i < 2; i++) {
-          byte rgb = random(0, 3);
-
-          // Primary color
-          if (i == 0) {
-            colors[rgb] = random(100, 256);
-          }
-          // Secondary
-          else {
-            colors[rgb] = random(0, 256);
-          }
-        }
-
-        // Random duration
-        int duration = random(1000, 2000);
-
-        // Start fade
-        fade_shelf(s, colors[0], colors[1], colors[2], duration);
-        prod1_durations[s] = duration;
-        prog1_dirs[s] = 1;
+        Serial.print(colors[0]);
+        Serial.print(", ");
+        Serial.print(colors[1]);
+        Serial.print(", ");
+        Serial.print(colors[2]);
+        Serial.print(" -> ");
+        Serial.println(duration[s]);
       }
     }
   }
@@ -567,59 +482,6 @@ void Program2::run() {
   }
 }
 
-
-/*
- -------------------------
- Custom program 2
- Cross fade RGB values between colors from Red to Green to Blue
- -------------------------
-*/
-int prog2_colors[] = {0, 0, 0};
-int prog2_index = 0;
-int prog2_speed = 3000;
-
-void init_program_2(){
-  //fade_all(0, 0, 0);
-}
-void run_program_2(){
-  // Adjust speed
-  if (ir_value == IR_DOWN) {
-    prog2_speed += 100;
-    change_speed(100);
-    Serial.print("Slow down: ");
-    Serial.println(prog2_speed);
-  }
-  else if (ir_value == IR_UP) {
-    prog2_speed -= 100;
-
-    if (prog2_speed < 500) {
-      prog2_speed = 500;
-    }
-
-    change_speed(-100);
-    Serial.print("Speed up: ");
-    Serial.println(prog2_speed);
-  }
-
-  // Move to the next color
-  if (!is_fading) {
-    prog2_colors[prog2_index] = 0;
-    prog2_index = wrap(++prog2_index, 0, 2);
-    prog2_colors[prog2_index] = 255;
-
-    Serial.print("Move to the next color");
-    Serial.println(prog2_index);
-
-    Serial.print(prog2_colors[0]);
-    Serial.print(", ");
-    Serial.print(prog2_colors[1]);
-    Serial.print(", ");
-    Serial.println(prog2_colors[2]);
-
-    fade_all(prog2_colors[0], prog2_colors[1], prog2_colors[2], prog2_speed);
-  }
-}
-
 /*
  -------------------------
  Program 3
@@ -661,7 +523,7 @@ void Program3::blink(){
 
   set_all(blink_colors[0], blink_colors[1], blink_colors[2]);
   delay(400);
-  fade_all(colors[0], colors[1], colors[2]);
+  fade_all(colors[0], colors[1], colors[2], 500);
 }
 
 // Save the current values to the EEPROM
@@ -740,107 +602,4 @@ void Program3::run() {
     // Save values to EEPROM
     save();
   }
-}
-
-/*
- -------------------------
- Custom program 4
- Select the color with the remote
- Start with Red, move Up/Down to adjust the intensity of that color.
- Move right to adjust Green.
- Move right to adjust Blue.
- Move right to go back to Red. (move left to go the opposite direction)
- Press select to clear colors.
- -------------------------
-*/
-byte prog3_color_select = 0;
-byte prog3_colors[] = {0,0,0};
-byte prog3_inc = 20;
-int prog3_speed = 100;
-char prog3_last_ir = 0;
-void init_program_3(){
-
-  // Load colors from EEPROM: select, r, g, b
-  byte select = EEPROM.read(0);
-  if (select <= 2) {
-    prog3_colors[0] = constrain(EEPROM.read(1), 0, 255);
-    prog3_colors[1] = constrain(EEPROM.read(2), 0, 255);
-    prog3_colors[2] = constrain(EEPROM.read(3), 0, 255);
-    fade_all(prog3_colors[0], prog3_colors[1], prog3_colors[2], 1000);
-    delay(1000);
-  }
-  else {
-    off();
-  }
-
-  blink_program_3();
-}
-void run_program_3(){
-  if (ir_value) {
-
-    int color = prog3_colors[prog3_color_select];
-
-    switch(ir_value) {
-    case IR_SELECT:
-      prog3_colors[0] = 0;
-      prog3_colors[1] = 0;
-      prog3_colors[2] = 0;
-    break;
-    case IR_UP:
-      color += prog3_inc;
-      Serial.print("Increase color ");
-      Serial.println(prog3_color_select);
-    break;
-    case IR_DOWN:
-      color -= prog3_inc;
-      Serial.print("Decrease color ");
-      Serial.println(prog3_color_select);
-    break;
-    case IR_RIGHT:
-      prog3_color_select++;
-      prog3_color_select = wrap(prog3_color_select, 0, 2);
-      Serial.print("Move color to");
-      Serial.println(prog3_color_select);
-      color = prog3_colors[prog3_color_select];
-      blink_program_3();
-    break;
-    case IR_LEFT:
-      prog3_color_select--;
-      prog3_color_select = wrap(prog3_color_select, 0, 2);
-      Serial.print("Move color to");
-      Serial.println(prog3_color_select);
-      color = prog3_colors[prog3_color_select];
-      blink_program_3();
-    break;
-    }
-    ir_value = 0;
-
-    color = constrain(color, 0, 255);
-    prog3_colors[prog3_color_select] = color;
-
-    Serial.print(prog3_colors[0]);
-    Serial.print(", ");
-    Serial.print(prog3_colors[1]);
-    Serial.print(", ");
-    Serial.println(prog3_colors[2]);
-
-    // Set colors
-    fade_all(prog3_colors[0], prog3_colors[1], prog3_colors[2], prog3_speed);
-
-    // Save to EEPROM
-    EEPROM.write(0, prog3_color_select);
-    EEPROM.write(1, prog3_colors[0]);
-    EEPROM.write(2, prog3_colors[1]);
-    EEPROM.write(3, prog3_colors[2]);
-  }
-}
-
-// Blink the color that is selected
-void blink_program_3(){
-  int colors[3] = {0,0,0};
-  colors[prog3_color_select] = 150;
-
-  set_all(colors[0], colors[1], colors[2]);
-  delay(400);
-  fade_all(prog3_colors[0], prog3_colors[1], prog3_colors[2]);
 }
