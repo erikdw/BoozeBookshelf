@@ -13,4 +13,4 @@ Circuit
 -------
 [![Circuit](https://raw.github.com/jgillick/BoozeBookshelf/master/assets/full_circuit.png)](https://raw.github.com/jgillick/BoozeBookshelf/master/assets/full_circuit.png)
 
-This is the cirtuit with only one of the 4 shelves connected.
+This is the cirtuit with only 1 of the 4 shelves connected.
