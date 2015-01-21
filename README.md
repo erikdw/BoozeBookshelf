@@ -17,5 +17,5 @@ This picture only shows one of the four shelves connected.
 
 Circuit diagram for one shelf
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-[![Mosfet diagram](https://raw.github.com/jgillick/BoozeBookshelf/master/assets/MosfetLED_schematic.png)](https://raw.github.com/jgillick/BoozeBookshelf/master/assets/MosfetLED_schematic.png)
+[![Mosfet Diagram](https://raw.githubusercontent.com/jgillick/BoozeBookshelf/master/assets/MosfetLED_schematic.png)](https://raw.githubusercontent.com/jgillick/BoozeBookshelf/master/assets/MosfetLED_schematic.png)
 
