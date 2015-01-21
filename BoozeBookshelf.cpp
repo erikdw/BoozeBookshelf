@@ -54,6 +54,13 @@ void setup() {
   off();
   delay(500);
 
+  // Add linear fade curve to all LEDs
+  for (int shelf = 0; shelf < SHELVES; shelf++) {
+    for (int rgb = 0; rgb < RGB; rgb++) {
+      shelves[shelf][rgb].set_curve(Curve::linear);
+    }
+  }
+
   // IR receiver
   Serial1.begin(115200);
 
@@ -107,7 +114,7 @@ int wrap(int val, int min, int max){
 byte run_program() {
   byte last_prog = current_program_num;
 
-  // IR Command recieved
+  // IR Command received
   if (Serial1.available()) {
     ir_value = Serial1.read();
     Serial.println(ir_value);
@@ -298,6 +305,7 @@ Program0::Program0() {
 void Program0::run() {
   int distance = get_distance();
 
+
   // Invalid distance, too close to for the sensor
   if (distance <= 30) {
     return;
@@ -328,29 +336,31 @@ void Program0::run() {
     }
   }
 
-  // Medium range
-  if (distance <= MED_RANGE && distance > CLOSE_RANGE && !range_medium && !range_close) {
-    Serial.println("Medium range");
-    range_close = false;
-    range_medium = true;
-    out_range_timer = 0;
-    fade_all(30, FADE_SPEED);
-  }
-
   // Close range
   if (!range_close && distance <= CLOSE_RANGE) {
-    Serial.println("Close range");
+    Serial.print("Close range: ");
+    Serial.println(distance);
     range_close = true;
     range_medium = true;
     out_range_timer = 0;
     fade_all(255, FADE_SPEED);
+  }
+
+  // Medium range
+  else if (!range_medium && distance <= MED_RANGE) {
+    Serial.print("Medium range: ");
+    Serial.println(distance);
+    range_close = false;
+    range_medium = true;
+    out_range_timer = 0;
+    fade_all(30, FADE_SPEED);
   }
 }
 
 /*
  -------------------------
  Program 1
- Fade a random color up/down on each shelf independant of all other shelves
+ Fade a random color up/down on each shelf independent of all other shelves
  -------------------------
 */
 Program1::Program1() {
